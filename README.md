@@ -17,7 +17,7 @@ path = "src/test.rs"
 harness = false
 
 [dev-dependencies]
-wright = { "git": "https://github.com/CoBrooks/wright" }
+wright = { "git" = "https://github.com/CoBrooks/wright" }
 ```
 
 ### src/test.rs
