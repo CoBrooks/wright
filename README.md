@@ -26,27 +26,38 @@ wright = { "git": "https://github.com/CoBrooks/wright" }
 use wright::*;
 
 fn main() {
-    describe("Vec", || {
-        describe("a newly instantiated Vec", || {
-            let v: Vec<()> = Vec::new();
+    describe("string", || {
+        describe("::from", || {
+            it("should convert &str -> string", || {
+                let slice = "hello, world!";
 
-            it("should be empty", move || {
-                expect(v).to().be().empty()
+                expect(slice).to().be().a::<&str>()
+                    && expect(string::from(slice)).to().be().a::<string>()
             });
         });
-    });
-    
-    describe("Option", || {
-        describe("Some(..)", || {
-            let s: Option<()> = Some(());
 
-            it("should be some", move || {
-                expect(s).to().be().some()
+        describe("::new", || {
+            it("should be empty", || {
+                let s = string::new();
+
+                expect(s.len()).to().equal(0)
+            });
+        });
+
+        describe(".pop", || {
+            it("should return the last char", || {
+                let mut s = string::from("hello, world!");
+                let c = s.pop();
+
+                expect(c).to().be().some()
+                    && expect(c.unwrap()).to().equal('!')
             });
             
-            let n: Option<()> = None;
-            it("should not be none", move || {
-                expect(n).to().not().be().none()
+            it("should return none if the string is empty", || {
+                let mut s = string::new();
+                let c = s.pop();
+
+                expect(c).to().be().none()
             });
         });
     });
@@ -55,19 +66,16 @@ fn main() {
 
 ## Running the Tests
 
-```bash
+```
 $ cargo test --test wright
-
-  Vec
-    a newly instantiated Vec
+  String
+    ::from
+      ✔ should convert &str -> String
+    ::new
       ✔ should be empty
+    .pop
+      ✔ should return the last char
+      ✔ should return None if the String is empty
 
-SUCCEEDED: 1    FAILED: 0    TOTAL: 1
-
-  Option
-    Some(..)
-      ✔ should be some
-      ✘ should not be none
-
-SUCCEEDED: 2    FAILED: 1    TOTAL: 3
+SUCCEEDED: 4   FAILED: 0   TOTAL: 4
 ```

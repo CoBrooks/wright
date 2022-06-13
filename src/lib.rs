@@ -27,14 +27,12 @@ impl<F: 'static + FnOnce() -> bool + Sized + Send> TestFn for F {
 
 pub struct Expectation<T> {
     val: Box<T>,
-    not: bool,
 }
 
 impl<T: 'static> Expectation<T> {
     pub fn new(t: T) -> Self {
         Expectation {
             val: Box::new(t),
-            not: false
         }
     }
 
@@ -43,18 +41,11 @@ impl<T: 'static> Expectation<T> {
     }
 
     pub fn equal<U: PartialEq<T>>(self, other: U) -> bool {
-        other == *self.val && !self.not
+        other == *self.val
     }
 
     pub fn be(self) -> Assertion<T> {
         Assertion::new(self)
-    }
-
-    pub fn not(self) -> Self {
-        Self {
-            not: true,
-            ..self
-        }
     }
 
     pub fn into_inner(self) -> T {
@@ -64,16 +55,13 @@ impl<T: 'static> Expectation<T> {
 
 pub struct Assertion<T>{
     val: Box<T>,
-    not: bool
 }
 
 impl<T: 'static> Assertion<T> {
     pub fn new(ex: Expectation<T>) -> Self {
-        let Expectation { val, not } = ex;
+        let Expectation { val } = ex;
 
-        Self {
-            val,
-            not,
+        Self { val,
         }
     }
 
@@ -91,17 +79,18 @@ impl<T: 'static> Assertion<T> {
         o.is_some()
     }
     
+    #[allow(unused_variables)]
     pub fn none(self) -> bool
-    where T: Into<Option<T>> {
+    where T: Debug + Into<Option<T>> {
         let o: Option<T> = (*self.val).into();
 
-        o.is_none()
+        matches!(Some(None::<T>), o)
     }
 
     pub fn a<U: 'static>(self) -> bool {
         let t: Box<dyn Any> = self.val;
 
-        let b = t.is::<U>() && !self.not;
+        let b = t.is::<U>();
 
         b
     }
@@ -109,7 +98,7 @@ impl<T: 'static> Assertion<T> {
     pub fn an<U: 'static>(self) -> bool {
         let t: Box<dyn Any> = self.val;
         
-        t.is::<U>() && !self.not
+        t.is::<U>()
     }
 }
 

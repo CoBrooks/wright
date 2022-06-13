@@ -1,27 +1,38 @@
 use wright::*;
 
 fn main() {
-    describe("Vec", || {
-        describe("a newly instantiated Vec", || {
-            let v: Vec<()> = Vec::new();
+    describe("String", || {
+        describe("::from", || {
+            it("should convert &str -> String", || {
+                let slice = "Hello, World!";
 
-            it("should be empty", move || {
-                expect(v).to().be().empty()
+                expect(slice).to().be().a::<&str>()
+                    && expect(String::from(slice)).to().be().a::<String>()
             });
         });
-    });
-    
-    describe("Option", || {
-        describe("Some(..)", || {
-            let s: Option<()> = Some(());
 
-            it("should be some", move || {
-                expect(s).to().be().some()
+        describe("::new", || {
+            it("should be empty", || {
+                let s = String::new();
+
+                expect(s.len()).to().equal(0)
+            });
+        });
+
+        describe(".pop", || {
+            it("should return the last char", || {
+                let mut s = String::from("Hello, World!");
+                let c = s.pop();
+
+                expect(c).to().be().some()
+                    && expect(c.unwrap()).to().equal('!')
             });
             
-            let n: Option<()> = None;
-            it("should not be none", move || {
-                expect(n).to().not().be().none()
+            it("should return None if the String is empty", || {
+                let mut s = String::new();
+                let c = s.pop();
+
+                expect(c).to().be().none()
             });
         });
     });
