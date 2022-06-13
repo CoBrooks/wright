@@ -26,19 +26,19 @@ wright = { "git" = "https://github.com/CoBrooks/wright" }
 use wright::*;
 
 fn main() {
-    describe("string", || {
+    describe("String", || {
         describe("::from", || {
-            it("should convert &str -> string", || {
-                let slice = "hello, world!";
+            it("should convert &str -> String", || {
+                let slice = "Hello, World!";
 
                 expect(slice).to().be().a::<&str>()
-                    && expect(string::from(slice)).to().be().a::<string>()
+                    && expect(String::from(slice)).to().be().a::<String>()
             });
         });
 
         describe("::new", || {
             it("should be empty", || {
-                let s = string::new();
+                let s = String::new();
 
                 expect(s.len()).to().equal(0)
             });
@@ -46,15 +46,15 @@ fn main() {
 
         describe(".pop", || {
             it("should return the last char", || {
-                let mut s = string::from("hello, world!");
+                let mut s = String::from("Hello, World!");
                 let c = s.pop();
 
                 expect(c).to().be().some()
                     && expect(c.unwrap()).to().equal('!')
             });
             
-            it("should return none if the string is empty", || {
-                let mut s = string::new();
+            it("should return None if the String is empty", || {
+                let mut s = String::new();
                 let c = s.pop();
 
                 expect(c).to().be().none()
