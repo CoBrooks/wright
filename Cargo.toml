@@ -1,0 +1,17 @@
+[package]
+name = "wright"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "wright"
+path = "src/lib.rs"
+
+[[test]]
+name = "wright"
+path = "src/tests.rs"
+harness = false
+
+[dependencies]
+colored = "2.0"
+lazy_static = "*"
