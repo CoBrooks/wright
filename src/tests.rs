@@ -3,10 +3,10 @@ use wright::*;
 fn main() {
     describe("String", || {
         describe("::from", || {
-            let slice = "Hello, World!";
-            let string = String::from(slice);
-
             it("should convert &str -> String", || {
+                let slice = "Hello, World!";
+                let string = String::from(slice);
+
                 expect(&slice).to().be().a::<&str>()
                     && expect(&string).to().be().a::<String>()
             });
