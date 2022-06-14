@@ -11,12 +11,35 @@ fn main() {
                     && expect(&string).to().be().a::<String>()
             });
         });
+        
+        describe("::from_utf8", || {
+            it("should return Ok with valid utf-8", || {
+                let valid = vec![240, 159, 146, 150];
+                let s = String::from_utf8(valid);
+
+                expect(&s).to().be().ok() 
+            });
+            
+            it("should return Err with valid utf-8", || {
+                let invalid = vec![0, 159, 146, 150];
+                let s = String::from_utf8(invalid);
+
+                expect(&s).to().be().err()
+            });
+            
+            it("should be of correct length", || {
+                let valid = vec![240, 159, 146, 150];
+                let s = String::from_utf8(valid).unwrap();
+
+                expect(&s).to().have().length(4)
+            });
+        });
 
         describe("::new", || {
             let s = String::new();
 
             it("should be empty", || {
-                expect(&s.len()).to().equal(0)
+                expect(&s).to().be().empty()
             });
         });
 
@@ -26,7 +49,7 @@ fn main() {
             let c = s.pop();
             it("should return the last char", || {
                 expect(&c).to().be().some()
-                    && expect(&c.unwrap()).to().equal('A')
+                    && expect(&c).when().unwrapped().to().equal('A')
             });
             
             let c = s.pop();

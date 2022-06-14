@@ -1,8 +1,8 @@
-use core::any::Any;
-use core::fmt::Debug;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use colored::Colorize;
+
+pub mod assertions;
 
 pub trait TestFn: Sized + Send {
     fn run(self, name: String);
@@ -30,7 +30,7 @@ pub struct Expectation<'a, T> {
     val: &'a T,
 }
 
-impl<'a, T: 'a> Expectation<'a, T> {
+impl<'a, T> Expectation<'a, T> {
     pub fn new(t: &'a T) -> Self {
         Expectation {
             val: t,
@@ -45,63 +45,36 @@ impl<'a, T: 'a> Expectation<'a, T> {
         other == *self.val
     }
 
-    pub fn be(self) -> Assertion<'a, T> {
-        Assertion::new(self)
-    }
-}
-
-pub struct Assertion<'a, T>{
-    val: &'a T,
-}
-
-impl<'a, T: 'a> Assertion<'a, T> {
-    pub fn new(ex: Expectation<'a, T>) -> Self {
-        let Expectation { val } = ex;
-
-        Self { val }
-    }
-
-    pub fn empty(self) -> bool 
-    where &'a T: IntoIterator {
-        let i = self.val.into_iter();
-
-        i.count() == 0
-    }
-
-    pub fn some(self) -> bool
-    where &'a T: Into<Option<&'a T>> {
-        let o: Option<&'a T> = self.val.into();
-
-        o.is_some()
+    pub fn be(self) -> assertions::Equality<'a, T> {
+        self.into()
     }
     
-    #[allow(unused_variables)]
-    pub fn none(self) -> bool
-    where &'a T: Into<Option<&'a T>> {
-        let o: Option<&'a T> = self.val.into();
-
-        matches!(Some(None::<T>), o)
+    pub fn have(self) -> assertions::Property<'a, T> {
+        self.into()
     }
 
-    pub fn a<U: 'static>(self) -> bool
-    where T: Any {
-        let t: &'a dyn Any = self.val;
-
-        let b = t.is::<U>();
-
-        b
-    }
-
-    pub fn an<U: 'static>(self) -> bool 
-    where T: Any {
-        let t: &dyn Any = self.val;
-        
-        t.is::<U>()
+    pub fn when(self) -> ExpectationClause<'a, T> {
+        ExpectationClause { val: self.val }
     }
 }
 
-pub fn expect<'a, T>(t: &'a T) -> Expectation<'a, T> 
-where T: Debug + PartialEq<T> {
+pub struct ExpectationClause<'a, T> {
+    val: &'a T
+}
+
+impl<'a, T> ExpectationClause<'a, Option<T>> {
+    pub fn unwrapped(self) -> Expectation<'a, T> {
+        Expectation::new(self.val.as_ref().unwrap())
+    }
+}
+
+impl<'a, T, E: std::fmt::Debug> ExpectationClause<'a, Result<T, E>> {
+    pub fn unwrapped(self) -> Expectation<'a, T> {
+        Expectation::new(self.val.as_ref().unwrap())
+    }
+}
+
+pub fn expect<'a, T>(t: &'a T) -> Expectation<'a, T> {
     Expectation::new(t)
 }
 
