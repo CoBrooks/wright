@@ -45,7 +45,7 @@ fn main() {
                 expect(&s).to().be().ok() 
             });
             
-            it("should return Err with valid utf-8", || {
+            it("should return Err with invalid utf-8", || {
                 let invalid = vec![0, 159, 146, 150];
                 let s = String::from_utf8(invalid);
 
