@@ -4,14 +4,15 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use colored::Colorize;
 
-pub trait TestFn: 'static + Sized + Send {
+pub trait TestFn: Sized + Send {
     fn run(self, name: String);
 }
 
 static SUCCEEDED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
-impl<F: 'static + FnOnce() -> bool + Sized + Send> TestFn for F {
+impl<F> TestFn for F
+where F: Fn() -> bool + Sized + Send {
     fn run(self, name: String)  {
         if self() {
             println!("{} {}", "✔".green().bold(), name.bright_black());
@@ -25,14 +26,14 @@ impl<F: 'static + FnOnce() -> bool + Sized + Send> TestFn for F {
     }
 }
 
-pub struct Expectation<T> {
-    val: Box<T>,
+pub struct Expectation<'a, T> {
+    val: &'a T,
 }
 
-impl<T: 'static> Expectation<T> {
-    pub fn new(t: T) -> Self {
+impl<'a, T: 'a> Expectation<'a, T> {
+    pub fn new(t: &'a T) -> Self {
         Expectation {
-            val: Box::new(t),
+            val: t,
         }
     }
 
@@ -44,80 +45,76 @@ impl<T: 'static> Expectation<T> {
         other == *self.val
     }
 
-    pub fn be(self) -> Assertion<T> {
+    pub fn be(self) -> Assertion<'a, T> {
         Assertion::new(self)
     }
-
-    pub fn into_inner(self) -> T {
-        *self.val
-    }
 }
 
-pub struct Assertion<T>{
-    val: Box<T>,
+pub struct Assertion<'a, T>{
+    val: &'a T,
 }
 
-impl<T: 'static> Assertion<T> {
-    pub fn new(ex: Expectation<T>) -> Self {
+impl<'a, T: 'a> Assertion<'a, T> {
+    pub fn new(ex: Expectation<'a, T>) -> Self {
         let Expectation { val } = ex;
 
-        Self { val,
-        }
+        Self { val }
     }
 
     pub fn empty(self) -> bool 
-    where T: IntoIterator {
+    where &'a T: IntoIterator {
         let i = self.val.into_iter();
 
         i.count() == 0
     }
 
     pub fn some(self) -> bool
-    where T: Into<Option<T>> {
-        let o: Option<T> = (*self.val).into();
+    where &'a T: Into<Option<&'a T>> {
+        let o: Option<&'a T> = self.val.into();
 
         o.is_some()
     }
     
     #[allow(unused_variables)]
     pub fn none(self) -> bool
-    where T: Debug + Into<Option<T>> {
-        let o: Option<T> = (*self.val).into();
+    where &'a T: Into<Option<&'a T>> {
+        let o: Option<&'a T> = self.val.into();
 
         matches!(Some(None::<T>), o)
     }
 
-    pub fn a<U: 'static>(self) -> bool {
-        let t: Box<dyn Any> = self.val;
+    pub fn a<U: 'static>(self) -> bool
+    where T: Any {
+        let t: &'a dyn Any = self.val;
 
         let b = t.is::<U>();
 
         b
     }
 
-    pub fn an<U: 'static>(self) -> bool {
-        let t: Box<dyn Any> = self.val;
+    pub fn an<U: 'static>(self) -> bool 
+    where T: Any {
+        let t: &dyn Any = self.val;
         
         t.is::<U>()
     }
 }
 
-pub fn expect<T: 'static + Debug + PartialEq<T>>(t: T) -> Expectation<T> {
+pub fn expect<'a, T>(t: &'a T) -> Expectation<'a, T> 
+where T: Debug + PartialEq<T> {
     Expectation::new(t)
 }
 
 static DEPTH: AtomicUsize = AtomicUsize::new(0);
 const TAB_WIDTH: usize = 2;
 
-pub fn describe(description: impl Into<String>, body: impl FnOnce() + Send + 'static) {
+pub fn describe(description: impl Into<String>, body: impl Fn() + Send) {
     DEPTH.fetch_add(TAB_WIDTH, Ordering::Relaxed);
 
     let description = description.into();
     println!("{:>depth$}{description}", " ", depth = DEPTH.load(Ordering::Relaxed));
 
-    let handle = std::thread::spawn(body);
-
-    handle.join().unwrap();
+    body();
     
     DEPTH.fetch_sub(TAB_WIDTH, Ordering::Relaxed);
 

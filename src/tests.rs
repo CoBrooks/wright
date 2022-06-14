@@ -3,36 +3,35 @@ use wright::*;
 fn main() {
     describe("String", || {
         describe("::from", || {
-            it("should convert &str -> String", || {
-                let slice = "Hello, World!";
+            let slice = "Hello, World!";
+            let string = String::from(slice);
 
-                expect(slice).to().be().a::<&str>()
-                    && expect(String::from(slice)).to().be().a::<String>()
+            it("should convert &str -> String", || {
+                expect(&slice).to().be().a::<&str>()
+                    && expect(&string).to().be().a::<String>()
             });
         });
 
         describe("::new", || {
-            it("should be empty", || {
-                let s = String::new();
+            let s = String::new();
 
-                expect(s.len()).to().equal(0)
+            it("should be empty", || {
+                expect(&s.len()).to().equal(0)
             });
         });
 
         describe(".pop", || {
-            it("should return the last char", || {
-                let mut s = String::from("Hello, World!");
-                let c = s.pop();
+            let mut s = String::from("A");
 
-                expect(c).to().be().some()
-                    && expect(c.unwrap()).to().equal('!')
+            let c = s.pop();
+            it("should return the last char", || {
+                expect(&c).to().be().some()
+                    && expect(&c.unwrap()).to().equal('A')
             });
             
+            let c = s.pop();
             it("should return None if the String is empty", || {
-                let mut s = String::new();
-                let c = s.pop();
-
-                expect(c).to().be().none()
+                expect(&c).to().be().none()
             });
         });
     });
