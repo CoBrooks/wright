@@ -1,15 +1,77 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use colored::Colorize;
+#[macro_use] extern crate lazy_static;
 
 pub mod assertions;
+
+const TAB_WIDTH: usize = 2;
+lazy_static! {
+    static ref STATE: TestState = TestState::new();
+}
+
+struct TestState {
+    succeeded: Arc<Mutex<usize>>,
+    failed: Arc<Mutex<usize>>,
+    depth: Arc<Mutex<usize>>,
+}
+
+impl TestState {
+    pub fn new() -> Self {
+        TestState {
+            succeeded: Arc::new(Mutex::new(0)),
+            failed: Arc::new(Mutex::new(0)),
+            depth: Arc::new(Mutex::new(0))
+        }
+    }
+
+    pub fn at_root(&self) -> bool {
+        *self.depth.lock().unwrap() == 0
+    }
+
+    pub fn inc_succeeded(&self) {
+        let mut succeeded = self.succeeded.lock().unwrap();
+        *succeeded = *succeeded + 1;
+    }
+
+    pub fn inc_failed(&self) {
+        let mut failed = self.failed.lock().unwrap();
+        *failed = *failed + 1;
+    }
+    
+    pub fn add_tab(&self) {
+        let mut depth = self.depth.lock().unwrap();
+        *depth = *depth + TAB_WIDTH;
+    }
+    
+    pub fn sub_tab(&self) {
+        let mut depth = self.depth.lock().unwrap();
+        *depth = *depth - TAB_WIDTH;
+    }
+
+    pub fn print_indent(&self) {
+        let depth = *self.depth.lock().unwrap();
+        print!("{:>depth$}", " ");
+    }
+
+    pub fn print(&self) {
+        let TestState { succeeded, failed, .. } = self;
+        let s = *succeeded.lock().unwrap();
+        let f = *failed.lock().unwrap();
+        let t = s + f;
+
+        println!();
+        print!("{}: {s:<5}", "SUCCEEDED".green().bold());
+        print!("{}: {f:<5}", "FAILED".red().bold());
+        print!("{}: {t:<5}", "TOTAL".bright_black().bold());
+        println!();
+        println!();
+    }
+}
 
 pub trait TestFn: Sized + Send {
     fn run(self, name: String);
 }
-
-static SUCCEEDED: AtomicUsize = AtomicUsize::new(0);
-static FAILED: AtomicUsize = AtomicUsize::new(0);
 
 impl<F> TestFn for F
 where F: Fn() -> bool + Sized + Send {
@@ -17,11 +79,11 @@ where F: Fn() -> bool + Sized + Send {
         if self() {
             println!("{} {}", "✔".green().bold(), name.bright_black());
 
-            SUCCEEDED.fetch_add(1, Ordering::Relaxed);
+            STATE.inc_succeeded();
         } else {
             println!("{} {}", "✘".red().bold(), name.red().dimmed());
             
-            FAILED.fetch_add(1, Ordering::Relaxed);
+            STATE.inc_failed();
         }
     }
 }
@@ -78,36 +140,28 @@ pub fn expect<'a, T>(t: &'a T) -> Expectation<'a, T> {
     Expectation::new(t)
 }
 
-static DEPTH: AtomicUsize = AtomicUsize::new(0);
-const TAB_WIDTH: usize = 2;
 
 pub fn describe(description: impl Into<String>, body: impl Fn() + Send) {
-    DEPTH.fetch_add(TAB_WIDTH, Ordering::Relaxed);
+    STATE.add_tab();
+    STATE.print_indent();
 
     let description = description.into();
-    println!("{:>depth$}{description}", " ", depth = DEPTH.load(Ordering::Relaxed));
+    println!("{description}");
 
     body();
     
-    DEPTH.fetch_sub(TAB_WIDTH, Ordering::Relaxed);
+    STATE.sub_tab();
 
-    if DEPTH.load(Ordering::Relaxed) == 0 {
-        let s = SUCCEEDED.load(Ordering::Relaxed);
-        let f = FAILED.load(Ordering::Relaxed);
-
-        println!();
-        print!("{}: {s:<5}", "SUCCEEDED".green().bold());
-        print!("{}: {f:<5}", "FAILED".red().bold());
-        print!("{}: {}\n", "TOTAL".bright_black(), s + f);
-        println!();
+    if STATE.at_root() {
+        STATE.print();
     }
 }
 
 pub fn it(description: impl Into<String>, test: impl TestFn) {
-    DEPTH.fetch_add(TAB_WIDTH, Ordering::Relaxed);
+    STATE.add_tab();
+    STATE.print_indent();
 
-    print!("{:>depth$}", " ", depth = DEPTH.load(Ordering::Relaxed));
     test.run(description.into());
 
-    DEPTH.fetch_sub(TAB_WIDTH, Ordering::Relaxed);
+    STATE.sub_tab();
 }
