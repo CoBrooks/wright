@@ -13,8 +13,16 @@ impl<'a, T> From<Expectation<'a, T>> for Property<'a, T> {
 }
 
 impl<'a, T> Property<'a, T> {
-    pub fn length<U>(self, len: usize) -> bool 
+    pub fn length<U>(self, len: usize) -> TestResult
     where T: AsRef<[U]> {
-        self.val.as_ref().len() == len
+        let val = self.val.as_ref().len();
+
+        if val == len {
+            TestResult::Success
+        } else {
+            TestResult::Failure(
+                format!("Expected value of length {len}, found length {val}")
+            )
+        }
     }
 }

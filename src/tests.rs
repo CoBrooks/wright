@@ -7,8 +7,9 @@ fn main() {
                 let slice = "Hello, World!";
                 let string = String::from(slice);
 
-                expect(&slice).to().be().a::<&str>()
-                    && expect(&string).to().be().a::<String>()
+                expect(&slice).to().be().a::<&str>().and(
+                    expect(&string).to().be().a::<String>()
+                )
             });
         });
         
@@ -48,8 +49,9 @@ fn main() {
 
             let c = s.pop();
             it("should return the last char", || {
-                expect(&c).to().be().some()
-                    && expect(&c).when().unwrapped().to().equal('A')
+                expect(&c).to().be().some().and(
+                    expect(&c).when().unwrapped().to().equal('A')
+                )
             });
             
             let c = s.pop();

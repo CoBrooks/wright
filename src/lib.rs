@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, fmt::Debug};
 
 use colored::Colorize;
 #[macro_use] extern crate lazy_static;
@@ -31,22 +31,22 @@ impl TestState {
 
     pub fn inc_succeeded(&self) {
         let mut succeeded = self.succeeded.lock().unwrap();
-        *succeeded = *succeeded + 1;
+        *succeeded += 1;
     }
 
     pub fn inc_failed(&self) {
         let mut failed = self.failed.lock().unwrap();
-        *failed = *failed + 1;
+        *failed += 1;
     }
     
     pub fn add_tab(&self) {
         let mut depth = self.depth.lock().unwrap();
-        *depth = *depth + TAB_WIDTH;
+        *depth += TAB_WIDTH;
     }
     
     pub fn sub_tab(&self) {
         let mut depth = self.depth.lock().unwrap();
-        *depth = *depth - TAB_WIDTH;
+        *depth -= TAB_WIDTH;
     }
 
     pub fn print_indent(&self) {
@@ -69,21 +69,39 @@ impl TestState {
     }
 }
 
+pub enum TestResult {
+    Success,
+    Failure(String)
+}
+
+impl TestResult {
+    pub fn and(self, other: TestResult) -> TestResult {
+        match self {
+            TestResult::Success => other,
+            TestResult::Failure(_) => self
+        }
+    }
+}
+
 pub trait TestFn: Sized + Send {
     fn run(self, name: String);
 }
 
 impl<F> TestFn for F
-where F: Fn() -> bool + Sized + Send {
+where F: Fn() -> TestResult + Sized + Send {
     fn run(self, name: String)  {
-        if self() {
-            println!("{} {}", "✔".green().bold(), name.bright_black());
+        match self() {
+            TestResult::Success => {
+                println!("{} {}", "✔".green().bold(), name.bright_black());
 
-            STATE.inc_succeeded();
-        } else {
-            println!("{} {}", "✘".red().bold(), name.red().dimmed());
-            
-            STATE.inc_failed();
+                STATE.inc_succeeded();
+            },
+            TestResult::Failure(reason) => {
+                println!("{} {}", "✘".red().bold(), name.red().dimmed());
+                println!("{reason}");
+                
+                STATE.inc_failed();
+            }
         }
     }
 }
@@ -92,7 +110,8 @@ pub struct Expectation<'a, T> {
     val: &'a T,
 }
 
-impl<'a, T> Expectation<'a, T> {
+impl<'a, T> Expectation<'a, T> 
+where T: Debug {
     pub fn new(t: &'a T) -> Self {
         Expectation {
             val: t,
@@ -103,8 +122,15 @@ impl<'a, T> Expectation<'a, T> {
         self
     }
 
-    pub fn equal<U: PartialEq<T>>(self, other: U) -> bool {
-        other == *self.val
+    pub fn equal<U>(self, other: U) -> TestResult 
+    where U: PartialEq<T> + Debug {
+        if other == *self.val {
+            TestResult::Success
+        } else {
+            TestResult::Failure(
+                format!("Expected {other:?}, found {:?}", *self.val)
+            )
+        }
     }
 
     pub fn be(self) -> assertions::Equality<'a, T> {
@@ -124,19 +150,27 @@ pub struct ExpectationClause<'a, T> {
     val: &'a T
 }
 
-impl<'a, T> ExpectationClause<'a, Option<T>> {
+impl<'a, T> ExpectationClause<'a, Option<T>> 
+where T: Debug {
     pub fn unwrapped(self) -> Expectation<'a, T> {
         Expectation::new(self.val.as_ref().unwrap())
     }
 }
 
-impl<'a, T, E: std::fmt::Debug> ExpectationClause<'a, Result<T, E>> {
+impl<'a, T, E> ExpectationClause<'a, Result<T, E>> 
+where T: Debug,
+      E: Debug {
     pub fn unwrapped(self) -> Expectation<'a, T> {
         Expectation::new(self.val.as_ref().unwrap())
     }
+    
+    pub fn err_unwrapped(self) -> Expectation<'a, E> {
+        Expectation::new(self.val.as_ref().unwrap_err())
+    }
 }
 
-pub fn expect<'a, T>(t: &'a T) -> Expectation<'a, T> {
+pub fn expect<T>(t: &T) -> Expectation<T> 
+where T: Debug {
     Expectation::new(t)
 }
 

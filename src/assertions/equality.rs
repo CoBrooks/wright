@@ -1,4 +1,6 @@
 use core::any::Any;
+use core::fmt::Debug;
+use std::any::type_name;
 
 use super::*;
 
@@ -14,45 +16,75 @@ impl<'a, T> From<Expectation<'a, T>> for Equality<'a, T> {
     }
 }
 
-impl<'a, T> Equality<'a, Option<T>> {
-    pub fn some(self) -> bool {
-        self.val.is_some()
+impl<'a, T> Equality<'a, Option<T>>
+where T: Debug {
+    pub fn some(self) -> TestResult {
+        if self.val.is_some() {
+            TestResult::Success
+        } else {
+            TestResult::Failure("Expected Some(...), but value was None".to_string())
+        }
     }
     
-    pub fn none(self) -> bool {
-        self.val.is_none()
+    pub fn none(self) -> TestResult {
+        if self.val.is_none() {
+            TestResult::Success
+        } else {
+            TestResult::Failure("Expected None, but value was Some(...)".to_string())
+        }
     }
 }
 
-impl<'a, T, E> Equality<'a, Result<T, E>> {
-    pub fn ok(self) -> bool {
-        self.val.is_ok()
+impl<'a, T, E> Equality<'a, Result<T, E>> 
+where T: Debug,
+      E: Debug {
+    pub fn ok(self) -> TestResult {
+        match self.val {
+            Ok(_) => TestResult::Success,
+            Err(_) => TestResult::Failure(
+                format!("Expected value to be Ok(...), but it returned {:?}", self.val)
+            )
+        }
     }
     
-    pub fn err(self) -> bool {
-        self.val.is_err()
+    pub fn err(self) -> TestResult {
+        match self.val {
+            Ok(val) => TestResult::Failure(
+                format!("Expected value to be Err(...), but it returned Ok({val:?})")
+            ),
+            Err(_) => TestResult::Success,
+        }
     }
 }
 
-impl<'a, T> Equality<'a, T> {
-    pub fn empty<U>(self) -> bool 
+impl<'a, T> Equality<'a, T> 
+where T: Debug {
+    pub fn empty<U>(self) -> TestResult
     where T: AsRef<[U]> {
-        self.val.as_ref().is_empty()
+        if self.val.as_ref().is_empty() {
+            TestResult::Success
+        } else {
+            TestResult::Failure(
+                format!("Expected value to be empty, found {:?}", self.val)
+            )
+        }
     }
 
-    pub fn a<U: 'static>(self) -> bool
+    pub fn a<U: 'static>(self) -> TestResult
     where T: Any {
         let t: &'a dyn Any = self.val;
 
-        let b = t.is::<U>();
-
-        b
+        if t.is::<U>() {
+            TestResult::Success
+        } else {
+            TestResult::Failure(
+                format!("Expected value to be {}, was {}", type_name::<T>(), type_name::<U>())
+            )
+        }
     }
 
-    pub fn an<U: 'static>(self) -> bool 
+    pub fn an<U: 'static>(self) -> TestResult
     where T: Any {
-        let t: &dyn Any = self.val;
-        
-        t.is::<U>()
+        self.a::<U>()
     }
 }
