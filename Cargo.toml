@@ -4,14 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "wright"
-path = "src/lib.rs"
-
-[[test]]
-name = "wright"
-path = "src/tests.rs"
-harness = false
+proc-macro = true
 
 [dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }
 colored = "2.0"
 lazy_static = "*"

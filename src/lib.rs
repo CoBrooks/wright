@@ -1,201 +1,128 @@
-use std::{sync::{Arc, Mutex}, fmt::Debug};
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{
+    parenthesized,
+    parse::{Parse, ParseStream},
+    parse_macro_input, Expr,
+};
 
-use colored::Colorize;
-#[macro_use] extern crate lazy_static;
+mod keyword {
+    use syn::custom_keyword;
 
-pub mod assertions;
+    // Expect
+    custom_keyword!(to);
+    custom_keyword!(not);
 
-const TAB_WIDTH: usize = 2;
-lazy_static! {
-    static ref STATE: TestState = TestState::new();
+    // Assertion::Equality
+    custom_keyword!(equal);
+
+    // Assertion::Result
+    custom_keyword!(be);
+    custom_keyword!(ok);
+    custom_keyword!(err);
 }
 
-struct TestState {
-    succeeded: Arc<Mutex<usize>>,
-    failed: Arc<Mutex<usize>>,
-    depth: Arc<Mutex<usize>>,
+#[allow(dead_code)]
+#[non_exhaustive]
+enum Assertion {
+    Equality { kw: keyword::equal, other: Box<Expr> },
+    ResultOk { kw: keyword::be, ok: keyword::ok },
+    ResultErr { kw: keyword::be, err: keyword::err },
 }
 
-impl TestState {
-    pub fn new() -> Self {
-        TestState {
-            succeeded: Arc::new(Mutex::new(0)),
-            failed: Arc::new(Mutex::new(0)),
-            depth: Arc::new(Mutex::new(0))
-        }
-    }
-
-    pub fn at_root(&self) -> bool {
-        *self.depth.lock().unwrap() == 0
-    }
-
-    pub fn inc_succeeded(&self) {
-        let mut succeeded = self.succeeded.lock().unwrap();
-        *succeeded += 1;
-    }
-
-    pub fn inc_failed(&self) {
-        let mut failed = self.failed.lock().unwrap();
-        *failed += 1;
-    }
-    
-    pub fn add_tab(&self) {
-        let mut depth = self.depth.lock().unwrap();
-        *depth += TAB_WIDTH;
-    }
-    
-    pub fn sub_tab(&self) {
-        let mut depth = self.depth.lock().unwrap();
-        *depth -= TAB_WIDTH;
-    }
-
-    pub fn print_indent(&self) {
-        let depth = *self.depth.lock().unwrap();
-        print!("{:>depth$}", " ");
-    }
-
-    pub fn print(&self) {
-        let TestState { succeeded, failed, .. } = self;
-        let s = *succeeded.lock().unwrap();
-        let f = *failed.lock().unwrap();
-        let t = s + f;
-
-        println!();
-        print!("{}: {s:<5}", "SUCCEEDED".green().bold());
-        print!("{}: {f:<5}", "FAILED".red().bold());
-        print!("{}: {t:<5}", "TOTAL".bright_black().bold());
-        println!();
-        println!();
-    }
-}
-
-pub enum TestResult {
-    Success,
-    Failure(String)
-}
-
-impl TestResult {
-    pub fn and(self, other: TestResult) -> TestResult {
-        match self {
-            TestResult::Success => other,
-            TestResult::Failure(_) => self
-        }
-    }
-}
-
-pub trait TestFn: Sized + Send {
-    fn run(self, name: String);
-}
-
-impl<F> TestFn for F
-where F: Fn() -> TestResult + Sized + Send {
-    fn run(self, name: String)  {
-        match self() {
-            TestResult::Success => {
-                println!("{} {}", "✔".green().bold(), name.bright_black());
-
-                STATE.inc_succeeded();
+impl Assertion {
+    fn tokens(&self, value: Expr, not: bool) -> TokenStream {
+        let expanded = match self {
+            Assertion::Equality { other, .. } if !not => quote! {
+                assert_eq!(#value, #other);
             },
-            TestResult::Failure(reason) => {
-                println!("{} {}", "✘".red().bold(), name.red().dimmed());
-                println!("{reason}");
-                
-                STATE.inc_failed();
+            Assertion::Equality { other, .. } if not => quote! {
+                assert_ne!(#value, #other);
+            },
+
+            Assertion::ResultOk { .. } if !not => quote! {
+                assert!(#value.is_ok());
+            },
+            Assertion::ResultErr { .. } if not => quote! {
+                assert!(#value.is_ok());
+            },
+            
+            Assertion::ResultErr { .. } if !not => quote! {
+                assert!(#value.is_err());
+            },
+            Assertion::ResultOk { .. } if not => quote! {
+                assert!(#value.is_err());
+            },
+
+            _ => unimplemented!()
+        };
+
+        TokenStream::from(expanded)
+    }
+
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let start = input.lookahead1();
+
+        if start.peek(keyword::equal) {
+            Ok(Assertion::Equality {
+                kw: input.parse()?,
+                other: input.parse()?
+            })
+        } else if start.peek(keyword::be) {
+            let kw = input.parse()?;
+            let ok_or_err = input.lookahead1();
+
+            if ok_or_err.peek(keyword::ok) {
+                Ok(Assertion::ResultOk {
+                    kw,
+                    ok: input.parse()?
+                })
+            } else if ok_or_err.peek(keyword::err) {
+                Ok(Assertion::ResultErr {
+                    kw,
+                    err: input.parse()?
+                })
+            } else {
+                Err(ok_or_err.error())
             }
-        }
-    }
-}
-
-pub struct Expectation<'a, T> {
-    val: &'a T,
-}
-
-impl<'a, T> Expectation<'a, T> 
-where T: Debug {
-    pub fn new(t: &'a T) -> Self {
-        Expectation {
-            val: t,
-        }
-    }
-
-    pub fn to(self) -> Self {
-        self
-    }
-
-    pub fn equal<U>(self, other: U) -> TestResult 
-    where U: PartialEq<T> + Debug {
-        if other == *self.val {
-            TestResult::Success
         } else {
-            TestResult::Failure(
-                format!("Expected {other:?}, found {:?}", *self.val)
-            )
+            Err(start.error())
         }
     }
+}
 
-    pub fn be(self) -> assertions::Equality<'a, T> {
-        self.into()
-    }
-    
-    pub fn have(self) -> assertions::Property<'a, T> {
-        self.into()
-    }
+struct Expect {
+    value: Expr,
+    not: bool,
+    kind: Assertion,
+}
 
-    pub fn when(self) -> ExpectationClause<'a, T> {
-        ExpectationClause { val: self.val }
+impl Expect {
+    fn tokens(self) -> TokenStream {
+        self.kind.tokens(self.value, self.not)
     }
 }
 
-pub struct ExpectationClause<'a, T> {
-    val: &'a T
-}
+impl Parse for Expect {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let value;
+        parenthesized!(value in input);
+        let value = value.parse()?;
 
-impl<'a, T> ExpectationClause<'a, Option<T>> 
-where T: Debug {
-    pub fn unwrapped(self) -> Expectation<'a, T> {
-        Expectation::new(self.val.as_ref().unwrap())
+        input.parse::<keyword::to>()?;
+
+        let not_or_kind = input.lookahead1();
+        let not = not_or_kind.peek(keyword::not);
+
+        if not { input.parse::<keyword::not>()?; }
+
+        let kind = Assertion::parse(input)?;
+
+        Ok(Expect { value, not, kind })
     }
 }
 
-impl<'a, T, E> ExpectationClause<'a, Result<T, E>> 
-where T: Debug,
-      E: Debug {
-    pub fn unwrapped(self) -> Expectation<'a, T> {
-        Expectation::new(self.val.as_ref().unwrap())
-    }
-    
-    pub fn err_unwrapped(self) -> Expectation<'a, E> {
-        Expectation::new(self.val.as_ref().unwrap_err())
-    }
-}
-
-pub fn expect<T>(t: &T) -> Expectation<T> 
-where T: Debug {
-    Expectation::new(t)
-}
-
-
-pub fn describe(description: impl Into<String>, body: impl Fn() + Send) {
-    STATE.add_tab();
-    STATE.print_indent();
-
-    let description = description.into();
-    println!("{description}");
-
-    body();
-    
-    STATE.sub_tab();
-
-    if STATE.at_root() {
-        STATE.print();
-    }
-}
-
-pub fn it(description: impl Into<String>, test: impl TestFn) {
-    STATE.add_tab();
-    STATE.print_indent();
-
-    test.run(description.into());
-
-    STATE.sub_tab();
+#[proc_macro]
+pub fn expect(input: TokenStream) -> TokenStream {
+    parse_macro_input!(input as Expect).tokens()
 }
