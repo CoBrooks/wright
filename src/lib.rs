@@ -1,9 +1,9 @@
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{ quote, TokenStreamExt };
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream},
-    parse_macro_input, Expr,
+    parse_macro_input, Expr, Token, LitBool
 };
 
 mod keyword {
@@ -16,23 +16,45 @@ mod keyword {
     // Assertion::Equality
     custom_keyword!(equal);
 
-    // Assertion::Result
     custom_keyword!(be);
-    custom_keyword!(ok);
-    custom_keyword!(err);
+
+    // Assertion::Result
+    custom_keyword!(Ok);
+    custom_keyword!(Err);
+    
+    // Assertion::Result
+    custom_keyword!(Some);
+    custom_keyword!(None);
 }
 
 #[allow(dead_code)]
 #[non_exhaustive]
 enum Assertion {
     Equality { kw: keyword::equal, other: Box<Expr> },
-    ResultOk { kw: keyword::be, ok: keyword::ok },
-    ResultErr { kw: keyword::be, err: keyword::err },
+
+    ResultOk { kw: keyword::be, ok: keyword::Ok },
+    ResultErr { kw: keyword::be, err: keyword::Err },
+
+    OptionSome { kw: keyword::be, some: keyword::Some },
+    OptionNone { kw: keyword::be, none: keyword::None },
+
+    Bool { kw: keyword::be, literal: LitBool },
 }
 
 impl Assertion {
     fn tokens(&self, value: Expr, not: bool) -> TokenStream {
-        let expanded = match self {
+        let mut tokens = proc_macro2::TokenStream::new();
+
+        // Ensure value is a Result before checking is_ok / is_err
+        if let Assertion::ResultOk { .. } | Assertion::ResultErr { .. } = self { 
+            let assert_result = quote! {
+                let _assertResult: Result<_, _> = #value;
+            }.into_iter();
+
+            tokens.append_all(assert_result);
+        }
+
+        let assertion = match self {
             Assertion::Equality { other, .. } if !not => quote! {
                 assert_eq!(#value, #other);
             },
@@ -54,10 +76,33 @@ impl Assertion {
                 assert!(#value.is_err());
             },
 
-            _ => unimplemented!()
-        };
+            Assertion::OptionSome { .. } if !not => quote! {
+                assert!(#value.is_some());
+            },
+            Assertion::OptionNone { .. } if not => quote! {
+                assert!(#value.is_some());
+            },
+            
+            Assertion::OptionNone { .. } if !not => quote! {
+                assert!(#value.is_none());
+            },
+            Assertion::OptionSome { .. } if not => quote! {
+                assert!(#value.is_none());
+            },
 
-        TokenStream::from(expanded)
+            Assertion::Bool { literal, .. } if !not => quote! {
+                assert_eq!(#value, #literal);
+            },
+            Assertion::Bool { literal, .. } if not => quote! {
+                assert_ne!(#value, #literal);
+            },
+
+            _ => unimplemented!()
+        }.into_iter();
+
+        tokens.append_all(assertion);
+
+        TokenStream::from(tokens)
     }
 
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -70,20 +115,35 @@ impl Assertion {
             })
         } else if start.peek(keyword::be) {
             let kw = input.parse()?;
-            let ok_or_err = input.lookahead1();
+            let next = input.lookahead1();
 
-            if ok_or_err.peek(keyword::ok) {
+            if next.peek(keyword::Ok) {
                 Ok(Assertion::ResultOk {
                     kw,
                     ok: input.parse()?
                 })
-            } else if ok_or_err.peek(keyword::err) {
+            } else if next.peek(keyword::Err) {
                 Ok(Assertion::ResultErr {
                     kw,
                     err: input.parse()?
                 })
+            } else if next.peek(keyword::Some) {
+                Ok(Assertion::OptionSome {
+                    kw,
+                    some: input.parse()?
+                })
+            } else if next.peek(keyword::None) {
+                Ok(Assertion::OptionNone {
+                    kw,
+                    none: input.parse()?
+                })
+            } else if next.peek(LitBool) {
+                Ok(Assertion::Bool {
+                    kw,
+                    literal: input.parse()?
+                })
             } else {
-                Err(ok_or_err.error())
+                Err(next.error())
             }
         } else {
             Err(start.error())
@@ -105,9 +165,32 @@ impl Expect {
 
 impl Parse for Expect {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let unwrap = if input.peek(keyword::Ok) {
+            input.parse::<keyword::Ok>()?;
+            true
+        } else if input.peek(keyword::Some) {
+            input.parse::<keyword::Some>()?;
+            true
+        } else {
+            false
+        };
+        
+        let unwrap_err = if input.peek(keyword::Err) {
+            input.parse::<keyword::Err>()?;
+            true
+        } else {
+            false
+        };
+
         let value;
         parenthesized!(value in input);
-        let value = value.parse()?;
+        let mut value = value.parse()?;
+
+        if unwrap {
+            value = Expr::Verbatim(quote! { #value.unwrap() });
+        } else if unwrap_err {
+            value = Expr::Verbatim(quote! { #value.unwrap_err() });
+        }
 
         input.parse::<keyword::to>()?;
 
@@ -126,3 +209,4 @@ impl Parse for Expect {
 pub fn expect(input: TokenStream) -> TokenStream {
     parse_macro_input!(input as Expect).tokens()
 }
+
