@@ -3,7 +3,7 @@ use quote::{ quote, ToTokens };
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream},
-    parse_macro_input, Expr, LitBool,
+    parse_macro_input, Expr, LitBool
 };
 
 mod keyword {
@@ -34,6 +34,161 @@ mod keyword {
     custom_keyword!(panic);
 }
 
+trait Assert {
+    fn parse(input: ParseStream) -> syn::Result<Self> where Self: Sized;
+    fn tokens(&self, lhs: Expr, inverse: bool) -> TokenStream;
+}
+
+struct Equal {
+    rhs: Expr
+}
+
+impl Assert for Equal {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        input.parse::<keyword::equal>()?;
+
+        let rhs = input.parse()?;
+
+        Ok(Equal { rhs })
+    }
+
+    fn tokens(&self, lhs: Expr, inverse: bool) -> TokenStream {
+        let Equal { rhs } = self;
+
+        match inverse {
+            false => quote! {
+                assert_eq!(#lhs, #rhs);
+            },
+            true => quote! {
+                assert_ne!(#lhs, #rhs);
+            },
+        }.into()
+    }
+}
+
+#[non_exhaustive]
+enum IdentityType {
+    Ok,
+    Err,
+    Some,
+    None,
+    True,
+    False,
+    Empty
+}
+
+struct Identity {
+    rhs: IdentityType
+}
+
+impl Assert for Identity {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        input.parse::<keyword::be>()?;
+
+        let ident = input.parse::<proc_macro2::TokenStream>()?;
+        let rhs = match ident.to_string().as_str() {
+            "Ok" => IdentityType::Ok,
+            "Err" => IdentityType::Err,
+            "Some" => IdentityType::Some,
+            "None" => IdentityType::None,
+            "true" => IdentityType::True,
+            "false" => IdentityType::False,
+            "empty" => IdentityType::Empty,
+            _ => panic!("Unrecognized identity `{ident}`")
+        };
+
+        Ok(Identity { rhs })
+    }
+
+    fn tokens(&self, lhs: Expr, inverse: bool) -> TokenStream {
+        let Identity { rhs } = self;
+
+        let assert_type = match rhs {
+            IdentityType::Ok | IdentityType::Err => quote! {
+                let _assert_result: Result<_, _> = #lhs;
+            },
+            IdentityType::Some | IdentityType::None => quote! {
+                let _assert_option: Option<_> = #lhs;
+            },
+            IdentityType::True | IdentityType::False => quote! {
+                let _assert_bool: bool = #lhs;
+            },
+            _ => quote! { }
+        };
+
+        let tokens = match inverse {
+            false => match rhs {
+                IdentityType::Ok => quote! { assert!(#lhs.is_ok()) },
+                IdentityType::Err => quote! { assert!(#lhs.is_err()) },
+                IdentityType::Some => quote! { assert!(#lhs.is_some()) },
+                IdentityType::None => quote! { assert!(#lhs.is_none()) },
+                IdentityType::True => quote! { assert!(#lhs) },
+                IdentityType::False => quote! { assert!(!#lhs) },
+                IdentityType::Empty => quote! { assert!(#lhs.is_empty()) },
+            },
+            true => match rhs {
+                IdentityType::Ok => quote! { assert!(#lhs.is_err()) },
+                IdentityType::Err => quote! { assert!(#lhs.is_ok()) },
+                IdentityType::Some => quote! { assert!(#lhs.is_none()) },
+                IdentityType::None => quote! { assert!(#lhs.is_some()) },
+                IdentityType::True => quote! { assert!(!#lhs) },
+                IdentityType::False => quote! { assert!(#lhs) },
+                IdentityType::Empty => quote! { assert!(!#lhs.is_empty()) },
+            },
+        };
+
+        quote! { #assert_type #tokens }.into()
+    }
+}
+
+enum FnResult {
+    Succeed,
+    Panic
+}
+
+struct CallFn {
+    rhs: FnResult
+}
+
+impl Assert for CallFn {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(keyword::succeed) {
+            input.parse::<keyword::succeed>()?;
+
+            Ok(CallFn { rhs: FnResult::Succeed })
+        } else if input.peek(keyword::panic) {
+            input.parse::<keyword::panic>()?;
+            
+            Ok(CallFn { rhs: FnResult::Panic })
+        } else {
+            Err(input.lookahead1().error())
+        }
+    }
+
+    fn tokens(&self, lhs: Expr, inverse: bool) -> TokenStream {
+        let CallFn { rhs } = self;
+
+        match inverse {
+            false => match rhs {
+                FnResult::Succeed => quote! {
+                    assert!(std::thread::spawn(move || #lhs).join().is_ok());
+                },
+                FnResult::Panic => quote! {
+                    assert!(std::thread::spawn(move || #lhs).join().is_err());
+                },
+            },
+            true => match rhs {
+                FnResult::Succeed => quote! {
+                    assert!(std::thread::spawn(move || #lhs).join().is_err());
+                },
+                FnResult::Panic => quote! {
+                    assert!(std::thread::spawn(move || #lhs).join().is_ok());
+                },
+            },
+        }.into()
+    }
+}
+
 #[allow(dead_code)]
 #[non_exhaustive]
 enum Assertion {
@@ -54,168 +209,15 @@ enum Assertion {
 }
 
 impl Assertion {
-    fn assert_type(&self, value: &Expr) -> impl ToTokens {
-        match self {
-            Assertion::ResultOk { .. } | Assertion::ResultErr { .. } => quote! {
-                let _assert_result: Result<_, _> = #value;
-            },
-
-            Assertion::OptionSome { .. } | Assertion::OptionNone { .. } => quote! {
-                let _assert_option: Option<_> = #value;
-            },
-
-            Assertion::Bool { .. } => quote! {
-                let _assert_bool: bool = #value;
-            },
-
-            _ => quote! { }
-        }
-    }
-
-    fn tokens(&self, value: Expr, not: bool) -> TokenStream {
-        let assert_type = self.assert_type(&value);
-
-        let escaped_value = value.to_token_stream()
-            .to_string()
-            .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-
-        let escaped_value = syn::parse_str::<syn::Ident>(&escaped_value).unwrap_or_else(|_| syn::parse_str::<syn::Ident>("_unused").unwrap());
-
-        let assertion = match self {
-            Assertion::Equality { other, .. } if !not => quote! {
-                assert_eq!(#value, #other);
-            },
-            Assertion::Equality { other, .. } if not => quote! {
-                assert_ne!(#value, #other);
-            },
-
-            Assertion::ResultOk { .. } if !not => quote! {
-                assert!(#value.is_ok());
-            },
-            Assertion::ResultErr { .. } if not => quote! {
-                assert!(#value.is_ok());
-            },
-            
-            Assertion::ResultErr { .. } if !not => quote! {
-                assert!(#value.is_err());
-            },
-            Assertion::ResultOk { .. } if not => quote! {
-                assert!(#value.is_err());
-            },
-
-            Assertion::OptionSome { .. } if !not => quote! {
-                assert!(#value.is_some());
-            },
-            Assertion::OptionNone { .. } if not => quote! {
-                assert!(#value.is_some());
-            },
-            
-            Assertion::OptionNone { .. } if !not => quote! {
-                assert!(#value.is_none());
-            },
-            Assertion::OptionSome { .. } if not => quote! {
-                assert!(#value.is_none());
-            },
-
-            Assertion::Bool { literal, .. } if !not => quote! {
-                assert_eq!(#value, #literal);
-            },
-            Assertion::Bool { literal, .. } if not => quote! {
-                assert_ne!(#value, #literal);
-            },
-
-            Assertion::Empty { .. } if !not => quote! {
-                assert!(#value.is_empty());
-            },
-            Assertion::Empty { .. } if not => quote! {
-                assert!(!#value.is_empty());
-            },
-
-            Assertion::FnSucceed { .. } if !not => quote! {
-                fn #escaped_value() { #value; }
-
-                assert!(std::thread::spawn(#escaped_value).join().is_ok());
-            },
-            Assertion::FnPanic { .. } if not => quote! {
-                fn #escaped_value() { #value; }
-
-                assert!(std::thread::spawn(#escaped_value).join().is_ok());
-            },
-
-            Assertion::FnPanic { .. } if !not => quote! {
-                fn #escaped_value() { #value; }
-
-                assert!(std::thread::spawn(#escaped_value).join().is_err());
-            },
-            Assertion::FnSucceed { .. } if not => quote! {
-                fn #escaped_value() { #value; }
-
-                assert!(std::thread::spawn(#escaped_value).join().is_err());
-            },
-            _ => unimplemented!()
-        };
-
-        let expanded: TokenStream = quote! {
-            {
-                #assert_type
-                #assertion
-            }
-        }.into();
-        
-        // eprintln!("{}\n", expanded);
-
-        expanded
-    }
-
-    fn parse(input: ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream) -> syn::Result<Box<dyn Assert>> {
         if input.peek(keyword::equal) {
-            Ok(Assertion::Equality {
-                kw: input.parse()?,
-                other: input.parse()?
-            })
+            Ok(Box::new(Equal::parse(input)?))
         } else if input.peek(keyword::be) {
-            let kw = input.parse()?;
-            let next = input.lookahead1();
-
-            if next.peek(keyword::Ok) {
-                Ok(Assertion::ResultOk {
-                    kw,
-                    ok: input.parse()?
-                })
-            } else if next.peek(keyword::Err) {
-                Ok(Assertion::ResultErr {
-                    kw,
-                    err: input.parse()?
-                })
-            } else if next.peek(keyword::Some) {
-                Ok(Assertion::OptionSome {
-                    kw,
-                    some: input.parse()?
-                })
-            } else if next.peek(keyword::None) {
-                Ok(Assertion::OptionNone {
-                    kw,
-                    none: input.parse()?
-                })
-            } else if next.peek(LitBool) {
-                Ok(Assertion::Bool {
-                    kw,
-                    literal: input.parse()?
-                })
-            } else if next.peek(keyword::empty) {
-                Ok(Assertion::Empty {
-                    kw,
-                    empty: input.parse()?
-                })
-            } else {
-                Err(next.error())
-            }
-        } else if input.peek(keyword::succeed) {
-            Ok(Assertion::FnSucceed { kw: input.parse()? })
-        } else if input.peek(keyword::panic) {
-            Ok(Assertion::FnPanic { kw: input.parse()? })
+            Ok(Box::new(Identity::parse(input)?))
+        } else if input.peek(keyword::succeed) || input.peek(keyword::panic) {
+            Ok(Box::new(CallFn::parse(input)?))
         } else {
-            Err(input.lookahead1().error())
+            unimplemented!("{input}")
         }
     }
 }
@@ -223,12 +225,19 @@ impl Assertion {
 struct Expect {
     value: Expr,
     not: bool,
-    kind: Assertion,
+    kind: Box<dyn Assert>,
 }
 
 impl Expect {
     fn tokens(self) -> TokenStream {
-        self.kind.tokens(self.value, self.not)
+        let Expect { value, not, kind } = self;
+
+        let tokens: proc_macro2::TokenStream = kind.tokens(value, not).into();
+
+        // Create new scope for assertions to minimize naming conflicts
+        quote! { 
+            { #tokens }
+        }.into()
     }
 }
 

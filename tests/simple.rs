@@ -83,4 +83,7 @@ fn function() {
     expect! { (add(1, 2)) to equal 3 };
     
     expect! { (add(255, 255)) to panic };
+
+    let char_a: u8 = b'A';
+    expect! { (char_a.is_ascii_digit()) to succeed };
 }
