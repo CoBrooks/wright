@@ -53,3 +53,34 @@ fn boolean() {
     expect! { (true) to not be false }
 }
 
+#[test]
+fn empty() {
+    let heap_string = String::new();
+    expect! { (heap_string) to be empty };
+
+    let stack_string = "";
+    expect! { (stack_string) to be empty };
+
+    let vec: Vec<()> = Vec::new();
+    expect! { (vec) to be empty };
+
+    use std::collections::HashSet;
+    let hs: HashSet<()> = HashSet::new();
+    expect! { (hs) to be empty };
+
+    let non_empty_str = "Hello, World!";
+    expect! { (non_empty_str) to not be empty };
+
+    let non_empty_vec = vec! [ 3 ];
+    expect! { (non_empty_vec) to not be empty };
+}
+
+#[test]
+fn function() {
+    fn add(a: u8, b: u8) -> u8 { a + b }
+
+    expect! { (add(1, 2)) to succeed };
+    expect! { (add(1, 2)) to equal 3 };
+    
+    expect! { (add(255, 255)) to panic };
+}
